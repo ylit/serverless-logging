@@ -1,0 +1,124 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Example function with publishing capability
+Parameters:
+  DestinationArn:
+    Type: String
+    Default: ""
+
+  DestinationArnExport:
+    Type: String
+    Default: CentralLogger:master:LogDestination
+
+  App:
+    Type: String
+    Default: Publisher
+
+  Branch:
+    Type: String
+    Default: master
+
+  Build:
+    Type: String
+    Default: 1
+
+Conditions:
+  DestinationArnExists: !Not [ !Equals [ !Ref "DestinationArn", "" ] ]
+
+Resources:
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+
+      Policies:
+        -
+          PolicyName: BaseLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource:
+              - "*"
+            - Effect: Allow
+              Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              Resource:
+              - "*"
+            - Effect: Allow
+              Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              Resource:
+              - "*"
+            - Effect: Allow
+              Action:
+              - cloudwatch:PutMetricData
+              Resource:
+              - "*"
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: [FunctionRole, Arn]
+      Runtime: python3.6
+      Code:
+        ZipFile: |
+          import os
+          def handler(event, context):
+              print("test")
+
+      MemorySize: 128
+      Timeout: 60
+      Environment:
+        Variables:
+          DEPLOYMENT_METADATA: !Sub '{"app": "${App}", "branch": "${Branch}", "build": ${Build}}'
+
+  FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Join:
+        - ''
+        - - "/aws/lambda/"
+          - Ref: Function
+      RetentionInDays: 30
+  SendLogsTo:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn:
+        Fn::If:
+          - DestinationArnExists
+          - !Ref DestinationArn
+          - Fn::ImportValue:
+              !Ref DestinationArnExport
+      FilterPattern: ''
+      LogGroupName:
+        Ref: FunctionLogGroup
+
+Outputs:
+  FunctionName:
+    Description: Name of the function
+    Value:
+      Ref: Function
+  FunctionArn:
+    Description: Arn of the function
+    Value:
+      Fn::GetAtt:
+      - Function
+      - Arn

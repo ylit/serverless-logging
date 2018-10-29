@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Centralised logging pattern
+Parameters:
+  KinesisStreamName:
+    Type: String
+    Default: CentralKinesisStream
+
+  LogDestinationName:
+    Type: String
+    Default: CentralLogDestination
+
+  KinesisShardCount:
+    Type: Number
+    Default: 1
+
+  WhitelistedAccounts:
+    Type: String
+
+  App:
+    Type: String
+    Default: CentralLogger
+
+  Branch:
+    Type: String
+    Default: master
+
+Resources:
+  Stream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      ShardCount: !Ref KinesisShardCount
+      Name:
+        Ref: KinesisStreamName
+
+  LogsDestinationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - logs.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        -
+          PolicyName: WriteLogsToKinesis
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - kinesis:DescribeStream
+              - kinesis:GetRecords
+              - kinesis:GetShardIterator
+              - kinesis:PutRecord
+              Resource:
+              - !GetAtt [ Stream, Arn ]
+
+  LogCollector:
+    Type: AWS::Logs::Destination
+    Properties:
+      DestinationName: !Ref LogDestinationName
+      RoleArn:
+        Fn::GetAtt: [ LogsDestinationRole, Arn ]
+      TargetArn: !GetAtt [ Stream, Arn ]
+      DestinationPolicy:
+         !Sub |
+           {
+             "Version":"2012-10-17",
+             "Statement":[
+               {
+                 "Effect":"Allow",
+                 "Principal": {"AWS":"${WhitelistedAccounts}"},
+                 "Action":"logs:*",
+                 "Resource":"*"
+               }
+             ]
+           }
+
+Outputs:
+  StreamArn:
+    Description: Kinesis stream ARN
+    Value:
+      Fn::GetAtt:
+      - Stream
+      - Arn
+
+  StreamName:
+    Description: Kinesis stream name
+    Value:
+      Ref: Stream
+
+  LogCollectorArn:
+    Description: Log Destination ARN
+    Value:
+      Fn::GetAtt:
+      - LogCollector
+      - Arn
+    Export:
+      Name: !Sub "${App}:${Branch}:LogDestination"
+
